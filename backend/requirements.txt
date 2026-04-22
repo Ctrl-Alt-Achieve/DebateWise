@@ -1,0 +1,6 @@
+crewai
+crewai[tools]
+langchain-google-genai
+google-search-results
+firebase-admin
+python-dotenv
