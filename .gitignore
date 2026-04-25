@@ -1,8 +1,44 @@
+# Secrets
 .env
+**/.env
+serviceAccountKey.json
+**/serviceAccountKey.json
+*.p12
+*.jks
+
+# Python
 __pycache__/
+**/__pycache__/
 *.pyc
 venv/
 env/
 .venv/
-serviceAccountKey.json
-.DS_Store
+
+# Flutter/Dart
+.dart_tool/
+**/.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+**/build/
+**/*.jks
+**/*.p12
+**/*.key
+**/*.keystore
+
+# IDEs
+.idea/
+**/.idea/
+.vscode/
+**/.vscode/
+*.swp
+*.swo
+*.DS_Store
+**/.DS_Store
+
+# Logs
+logs
+*.log
+**/logs
+**/*.log

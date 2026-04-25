@@ -4,8 +4,37 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../services/firebase_service.dart';
 import '../theme.dart';
 
-class DebateChatWidget extends StatelessWidget {
+class DebateChatWidget extends StatefulWidget {
   const DebateChatWidget({super.key});
+
+  @override
+  State<DebateChatWidget> createState() => _DebateChatWidgetState();
+}
+
+class _DebateChatWidgetState extends State<DebateChatWidget> {
+  final TextEditingController _controller = TextEditingController();
+
+  void _handleSubmitted(String text) {
+    print("[DEBUG] _handleSubmitted called with: $text");
+    if (text.trim().isEmpty) return;
+    
+    try {
+      // Send message via FirebaseService
+      Provider.of<FirebaseService>(context, listen: false).sendMessage(text);
+      print("[DEBUG] sendMessage called successfully");
+    } catch (e) {
+      print("[ERROR] Failed to send message: $e");
+    }
+    
+    // Clear the input
+    _controller.clear();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -114,7 +143,7 @@ class DebateChatWidget extends StatelessWidget {
         children: [
           // Live Chat Messages
           Container(
-            height: 300,
+            height: 400,
             margin: const EdgeInsets.only(bottom: 24),
             child: Consumer<FirebaseService>(
               builder: (context, service, child) {
@@ -124,27 +153,66 @@ class DebateChatWidget extends StatelessWidget {
                   );
                 }
                 return ListView.builder(
+                  reverse: false,
                   itemCount: service.messages.length,
                   itemBuilder: (context, index) {
                     final msg = service.messages[index];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12.0),
-                      child: Row(
+                    final bool isUser = msg.agent == 'User';
+                    final Color agentColor = _getAgentColor(msg.agent);
+                    
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: isUser 
+                            ? const Color(0xFF1E3A5F).withOpacity(0.5) 
+                            : const Color(0xFF1F2937).withOpacity(0.6),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isUser 
+                              ? Colors.blueAccent.withOpacity(0.3) 
+                              : agentColor.withOpacity(0.25),
+                          width: 1,
+                        ),
+                      ),
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          CircleAvatar(
-                            backgroundColor: _getAgentColor(msg.agent),
-                            child: Text(msg.agent.substring(0, 1), style: const TextStyle(color: Colors.white, fontSize: 12)),
+                          Row(
+                            children: [
+                              Container(
+                                width: 28,
+                                height: 28,
+                                decoration: BoxDecoration(
+                                  color: agentColor.withOpacity(0.2),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: agentColor.withOpacity(0.5)),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    msg.agent.isNotEmpty ? msg.agent[0].toUpperCase() : '?',
+                                    style: TextStyle(color: agentColor, fontSize: 12, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                msg.agent,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                  color: agentColor,
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(msg.agent, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white70)),
-                                const SizedBox(height: 4),
-                                Text(msg.text, style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4)),
-                              ],
+                          const SizedBox(height: 8),
+                          Text(
+                            msg.text,
+                            style: const TextStyle(
+                              color: Color(0xFFE5E7EB),
+                              fontSize: 14,
+                              height: 1.6,
                             ),
                           ),
                         ],
@@ -167,6 +235,8 @@ class DebateChatWidget extends StatelessWidget {
             child: Column(
               children: [
                 TextField(
+                  controller: _controller,
+                  onSubmitted: _handleSubmitted,
                   style: const TextStyle(color: Colors.white, fontSize: 18),
                   decoration: InputDecoration(
                     hintText: 'Observe the debate or inject a thought...',
@@ -191,13 +261,16 @@ class DebateChatWidget extends StatelessWidget {
                         const SizedBox(width: 4),
                         const Icon(LucideIcons.chevronDown, color: AppTheme.textGray, size: 14),
                         const SizedBox(width: 12),
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF374151),
-                            shape: BoxShape.circle,
+                        GestureDetector(
+                          onTap: () => _handleSubmitted(_controller.text),
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF374151),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(LucideIcons.arrowUp, color: Colors.white, size: 16),
                           ),
-                          child: const Icon(LucideIcons.arrowUp, color: Colors.white, size: 16),
                         ),
                       ],
                     ),
@@ -231,10 +304,13 @@ class DebateChatWidget extends StatelessWidget {
   }
 
   Color _getAgentColor(String agentName) {
-    if (agentName.toLowerCase().contains("skeptic")) return Colors.redAccent;
-    if (agentName.toLowerCase().contains("explain")) return Colors.blueAccent;
-    if (agentName.toLowerCase().contains("question")) return Colors.orangeAccent;
-    if (agentName.toLowerCase().contains("arbiter")) return Colors.purpleAccent;
+    final name = agentName.toLowerCase();
+    if (name == 'user') return Colors.cyanAccent;
+    if (name.contains("skeptic")) return Colors.redAccent;
+    if (name.contains("explain")) return Colors.blueAccent;
+    if (name.contains("question")) return Colors.orangeAccent;
+    if (name.contains("arbiter") || name.contains("verdict")) return Colors.purpleAccent;
+    if (name.contains("manager")) return Colors.tealAccent;
     return Colors.grey;
   }
 }

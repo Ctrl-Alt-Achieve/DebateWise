@@ -9,9 +9,7 @@ from tasks import get_debate_tasks
 from shadow_auditor import run_shadow_auditor
 from firebase_config import init_firebase, push_agent_message
 
-# This variable simulates what the student types in the UI
-MOCK_STUDENT_INPUT = "Mitochondria toh basically cell ki factory hai na, energy ke liye?"
-TOPIC = "Cellular Biology: Mitochondria"
+# The topic is now derived from the student's input dynamically.
 
 # We store the rigor injection globally so the before_action can access it
 current_rigor_injection = ""
@@ -33,20 +31,30 @@ def firebase_step_callback(output):
     Receives either an AgentFinish or AgentAction object from CrewAI.
     """
     try:
-        # In CrewAI v1.9+, step_callback receives an AgentFinish object
-        # AgentFinish stores the output in .return_values['output']
-        if hasattr(output, 'return_values'):
-            text = output.return_values.get('output', '')
-        # Fallback for AgentAction objects (tool use steps)
+        text = ""
+        agent_name = "Agent"
+
+        # Try to get the clean output text
+        if hasattr(output, 'result'):
+            text = str(output.result)
+        elif hasattr(output, 'output'):
+            text = str(output.output)
+        elif hasattr(output, 'return_values') and isinstance(output.return_values, dict):
+            text = output.return_values.get('output', str(output))
         elif hasattr(output, 'log'):
             text = output.log
-        # Fallback for any other object type
         else:
             text = str(output)
 
-        agent_name = getattr(output, 'agent', 'Unknown Agent')
+        # Try to get the agent name
+        if hasattr(output, 'agent') and output.agent:
+            agent_name = str(output.agent)
+        
+        # Skip empty or very short outputs
+        if not text or len(text.strip()) < 5:
+            return
 
-        print("\n--- [FIREBASE STREAM] ---")
+        print(f"\n--- [FIREBASE STREAM] ---")
         print(f"Agent: {agent_name}")
         print(f"Pushing to UI: {text[:150]}...")
         print("------------------------------\n")
@@ -56,8 +64,9 @@ def firebase_step_callback(output):
     except Exception as e:
         print(f"\n[FIREBASE STREAM ERROR]: Could not parse step output — {e}")
 
-def run_debate_crew():
-    init_firebase()
+def run_debate_crew(student_input):
+    if not init_firebase():
+        print("[WARNING] Firebase not initialized. Running without live DB stream.")
     global current_rigor_injection
     
     import os
@@ -69,21 +78,32 @@ def run_debate_crew():
     
     # 1. Get Agents
     skeptic, overexplainer, questioner, arbiter = get_agents()
-    
-    # 2. Add callbacks to all debaters
-    for agent in [skeptic, overexplainer, questioner, arbiter]:
-        agent.step_callback = firebase_step_callback
 
-    # 3. Get Tasks
-    tasks = get_debate_tasks([skeptic, overexplainer, questioner, arbiter], TOPIC, MOCK_STUDENT_INPUT)
+    # 3. Get Tasks — use the student's input as the topic
+    tasks = get_debate_tasks([skeptic, overexplainer, questioner, arbiter], student_input, student_input)
 
     # 4. Run Shadow Auditor Check
     # In a real app this runs asynchronously when the student hits 'Send'
-    current_rigor_injection = run_shadow_auditor(MOCK_STUDENT_INPUT, context="")
+    current_rigor_injection = run_shadow_auditor(student_input, context="")
     
     # If injection fired, we dynamically alter the challenge task
     if current_rigor_injection:
         tasks[1].description += current_rigor_injection # the challenge task
+
+    def task_output_callback(task_output):
+        """Called when each task completes. Push the result to Firebase."""
+        try:
+            agent_name = getattr(task_output, 'agent', 'Agent')
+            raw_output = getattr(task_output, 'raw', '') or str(task_output)
+            
+            print(f"\n--- [TASK COMPLETE -> FIREBASE] ---")
+            print(f"Agent: {agent_name}")
+            print(f"Output: {raw_output[:200]}...")
+            print("-----------------------------------\n")
+            
+            push_agent_message("default_session", str(agent_name), raw_output)
+        except Exception as e:
+            print(f"[TASK CALLBACK ERROR]: {e}")
 
     # 5. Initialize the Crew
     # We use Hierarchical Process which automatically creates the Manager Agent out of the LLM.
@@ -91,18 +111,92 @@ def run_debate_crew():
         agents=[skeptic, overexplainer, questioner, arbiter],
         tasks=tasks,
         process=Process.hierarchical,
-        manager_llm=flash_llm, # This replaces Agent 4!
-        verbose=True
+        manager_llm=flash_llm,
+        verbose=True,
+        step_callback=firebase_step_callback,
+        task_callback=task_output_callback,
     )
 
     print("\nStarting Debate Crew Simulation...")
     result = debate_crew.kickoff()
+    
+    # Also push the final combined result
+    push_agent_message("default_session", "Arbiter (Final Verdict)", str(result))
     
     print("\n=============================================")
     print("DEBATE SESSION COMPLETED")
     print("Final Output:")
     print(result)
     print("=============================================")
+
+def listen_for_inputs():
+    from firebase_admin import db
+    import time
+    
+    if not init_firebase():
+        print("[ERROR] Cannot listen to Firebase: initialization failed.")
+        return
+
+    print("\n=============================================")
+    print("🤖 DEBATEWISE BACKEND IS LIVE")
+    print("Listening for student inputs from the frontend...")
+    print("=============================================\n")
+
+    processed_inputs = set()
+
+    def listener(event):
+        print(f"[DEBUG] Firebase Event Received! Type: {event.event_type}, Path: {event.path}")
+        print(f"[DEBUG] Raw Data: {event.data}")
+        
+        if event.data is None:
+            return
+            
+        # If event.data is a dict, it might be the initial snapshot or a new push
+        # We iterate through all items to find ones we haven't processed yet
+        items_to_process = []
+        if isinstance(event.data, dict):
+            # Check if it's a single message (if path is deep) or a collection
+            if 'text' in event.data and 'agent' in event.data:
+                items_to_process = [event.data]
+            else:
+                # It's a collection of messages indexed by random keys
+                for key, val in event.data.items():
+                    if key not in processed_inputs:
+                        items_to_process.append(val)
+                        processed_inputs.add(key)
+        
+        for item in items_to_process:
+            text = item.get('text', '')
+            agent = item.get('agent', '')
+            
+            if agent == 'User' and text:
+                print(f"\n>> Received new User input: '{text}'")
+                print(">> Kicking off Debate Crew...")
+                try:
+                    run_debate_crew(student_input=text)
+                    print("\n>> Ready for next input...")
+                except Exception as e:
+                    print(f"[ERROR] Debate run failed: {e}")
+
+    # Listen for new child added to the inputs node
+    ref = db.reference('sessions/default_session/inputs')
+    # Using listen() to wait for new children
+    try:
+        ref.delete()
+    except Exception as e:
+        print(f"[WARNING] Could not clear old inputs (maybe database is empty or URL is incorrect): {e}")
+    
+    # We can't easily listen to just 'child_added' in Python Firebase Admin exactly like JS,
+    # but listen() triggers on any changes. To make it only trigger on new items,
+    # we can process event and keep track of processed keys if we wanted to.
+    # However, since we clear it, any new data added will trigger this.
+    ref.listen(listener)
+    
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nShutting down backend listener.")
 
 if __name__ == "__main__":
     # Check if API Key is set before running
@@ -112,5 +206,4 @@ if __name__ == "__main__":
     if not os.environ.get("SERPER_API_KEY"):
         print("MOCK RUN: SERPER_API_KEY not set. Web search for Arbiter will fail without it.")
         
-    run_debate_crew() 
-    print("Crew run complete.")
+    listen_for_inputs()
