@@ -7,6 +7,7 @@ load_dotenv()
 from agents import get_agents
 from tasks import get_debate_tasks
 from shadow_auditor import run_shadow_auditor
+from firebase_config import init_firebase, push_agent_message
 
 # This variable simulates what the student types in the UI
 MOCK_STUDENT_INPUT = "Mitochondria toh basically cell ki factory hai na, energy ke liye?"
@@ -45,20 +46,18 @@ def firebase_step_callback(output):
 
         agent_name = getattr(output, 'agent', 'Unknown Agent')
 
-        print("\n--- [FIREBASE STREAM MOCK] ---")
+        print("\n--- [FIREBASE STREAM] ---")
         print(f"Agent: {agent_name}")
         print(f"Pushing to UI: {text[:150]}...")
         print("------------------------------\n")
 
-        # [TO SAMAIRA & SAATVIK]:
-        # Replace the print statements above with Firebase Admin SDK calls.
-        # Push 'text' and 'agent_name' to your Firebase Realtime DB node like:
-        # db.reference(f'sessions/{session_id}/messages').push({'agent': agent_name, 'text': text})
+        push_agent_message("default_session", agent_name, text)
 
     except Exception as e:
         print(f"\n[FIREBASE STREAM ERROR]: Could not parse step output — {e}")
 
 def run_debate_crew():
+    init_firebase()
     global current_rigor_injection
     
     import os
