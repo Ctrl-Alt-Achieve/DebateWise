@@ -84,7 +84,7 @@ def run_debate_crew(student_input):
 
     # 4. Run Shadow Auditor Check
     # In a real app this runs asynchronously when the student hits 'Send'
-    current_rigor_injection = run_shadow_auditor(student_input, context="")
+    current_rigor_injection = run_shadow_auditor(student_input, context="", verbose=True)
     
     # If injection fired, we dynamically alter the challenge task
     if current_rigor_injection:
@@ -112,7 +112,7 @@ def run_debate_crew(student_input):
         tasks=tasks,
         process=Process.hierarchical,
         manager_llm=flash_llm,
-        verbose=True,
+        verbose=False,
         step_callback=firebase_step_callback,
         task_callback=task_output_callback,
     )

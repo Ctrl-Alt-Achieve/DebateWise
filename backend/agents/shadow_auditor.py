@@ -1,23 +1,25 @@
-def run_shadow_auditor(student_input, context):
+def run_shadow_auditor(student_input, context, verbose=False):
     """
     Step 1: Extract Logic Skeleton.
     Step 2: Generate Counterfactual Twin (Elite Academic English).
     Step 3: Run Dual-Inference Benchmarking (mocked here for hackathon speed).
-    Step 4: Return 'Rigor Injection' if Bias Delta > 1.5.
+    Step 4: Return (rigor_injection_string, bias_detected) tuple.
     """
     
     # In a full production app, this would use Gemini 3 Flash to extract the skeleton 
     # and compare score vectors. For the CrewAI callback, we mock the detection logic.
     
-    print(f"\n[SHADOW AUDITOR INVISIBLE CHECK]: Analyzing student input: '{student_input}'")
+    if verbose:
+        print(f"\n[SHADOW AUDITOR INVISIBLE CHECK]: Analyzing student input: '{student_input}'")
     
     # Simple heuristic to simulate bias detection for the hackathon demo
     hinglish_markers = ["toh", "na", "yaar", "matlab", "basically"]
     detected_markers = [m for m in hinglish_markers if m in student_input.lower()]
     
     if len(detected_markers) > 0 or len(student_input.split()) < 5:
-        print("[SHADOW AUDITOR FLAG]: Linguistic/Confidence Bias detected in parallel inference. Delta > 1.5!")
-        print("[SHADOW AUDITOR ACTION]: Firing Rigor Injection.")
+        if verbose:
+            print("[SHADOW AUDITOR FLAG]: Linguistic/Confidence Bias detected in parallel inference. Delta > 1.5!")
+            print("[SHADOW AUDITOR ACTION]: Firing Rigor Injection.")
         
         # This string gets injected into the CrewAI agent's context
         rigor_injection = (
@@ -27,5 +29,6 @@ def run_shadow_auditor(student_input, context):
         )
         return rigor_injection
     
-    print("[SHADOW AUDITOR]: Clean. No bias detected.")
+    if verbose:
+        print("[SHADOW AUDITOR]: Clean. No bias detected.")
     return ""
