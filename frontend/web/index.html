@@ -1,35 +1,44 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project for DebateWise.">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="DebateWise — AI-powered multi-agent debate platform. Watch Skeptic, Overexplainer, Questioner, and Arbiter agents debate any topic in real-time.">
+  <meta name="theme-color" content="#000000">
 
-  <!-- iOS meta tags & icons -->
+  <meta property="og:title" content="DebateWise — AI Debate Platform">
+  <meta property="og:description" content="Watch AI agents debate any topic from multiple perspectives, powered by CrewAI and Gemini.">
+  <meta property="og:type" content="website">
+
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="DebateWise">
 
-  <title>DebateWise</title>
+  <title>DebateWise — AI Debate Platform</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
   <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       background-color: #000000;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }
   </style>
 
   <script>
-    // The value below is injected by flutter build, do not touch.
     var serviceWorkerVersion = null;
   </script>
-  <!-- This script adds the flutter initialization JS code -->
   <script src="flutter.js" defer></script>
 </head>
 <body>
   <script>
     window.addEventListener('load', function(ev) {
-      // Download main.dart.js
       _flutter.loader.loadEntrypoint({
         serviceWorker: {
           serviceWorkerVersion: serviceWorkerVersion,
