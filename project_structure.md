@@ -1,3 +1,5 @@
+**VIEW IN CODE MODE**
+
 debatewise/
 │
 ├── frontend/                     # Flutter Web App
