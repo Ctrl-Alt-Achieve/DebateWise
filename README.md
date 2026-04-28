@@ -172,4 +172,4 @@ DebateWise/
 
 ## Team
 
-Built by **Ctrl+Alt+Achieve** for the DebateWise hackathon challenge.
+Built by **Ctrl+Alt+Achieve** for the Google Solutions challenge.
