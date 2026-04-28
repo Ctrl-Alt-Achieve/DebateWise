@@ -1,5 +1,8 @@
 import os
 import time
+import json
+import base64
+import tempfile
 import firebase_admin
 from firebase_admin import credentials, db
 
@@ -13,30 +16,37 @@ def init_firebase():
         return True
         
     try:
-        # Load credentials from serviceAccountKey.json if present
-        cred_path = os.environ.get("FIREBASE_CREDENTIALS", "serviceAccountKey.json")
         db_url = os.environ.get("FIREBASE_DB_URL", "https://MOCK_URL.firebaseio.com")
         
-        abs_cred_path = os.path.abspath(cred_path)
-        print(f"[FIREBASE DEBUG]: Checking for credentials at: {abs_cred_path}")
-        print(f"[FIREBASE DEBUG]: Database URL: {db_url}")
-        
-        if not os.path.exists(cred_path):
-            print(f"[FIREBASE WARNING]: '{abs_cred_path}' not found. Realtime DB streaming is disabled.")
-            return False
+        # Priority 1: Base64-encoded credentials from env var (Render / Cloud Run)
+        b64_creds = os.environ.get("FIREBASE_CREDENTIALS_BASE64", "")
+        if b64_creds:
+            print("[FIREBASE]: Using base64-encoded credentials from env var.")
+            cred_json = json.loads(base64.b64decode(b64_creds).decode("utf-8"))
+            cred = credentials.Certificate(cred_json)
+        else:
+            # Priority 2: Local file
+            cred_path = os.environ.get("FIREBASE_CREDENTIALS", "serviceAccountKey.json")
+            abs_cred_path = os.path.abspath(cred_path)
+            print(f"[FIREBASE]: Checking for credentials at: {abs_cred_path}")
+            
+            if not os.path.exists(cred_path):
+                print(f"[FIREBASE WARNING]: '{abs_cred_path}' not found. Realtime DB streaming is disabled.")
+                return False
+            
+            cred = credentials.Certificate(cred_path)
 
         if "MOCK_URL" in db_url:
-            print("[FIREBASE WARNING]: 'FIREBASE_DB_URL' not set globally. Ensure it is correct.")
+            print("[FIREBASE WARNING]: 'FIREBASE_DB_URL' not set. Ensure it is correct.")
             
-        cred = credentials.Certificate(cred_path)
         firebase_admin.initialize_app(cred, {
             'databaseURL': db_url
         })
         _firebase_initialized = True
-        print("[FIREBASE REALTME DB]: Connected successfully.")
+        print(f"[FIREBASE]: Connected successfully to {db_url}")
         return True
     except Exception as e:
-        print(f"[FIREBASE ERROR]: Failed to initialize config: {e}")
+        print(f"[FIREBASE ERROR]: Failed to initialize: {e}")
         return False
 
 def push_agent_message(session_id, agent_name, text):
