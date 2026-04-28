@@ -93,15 +93,31 @@ def run_debate_crew(student_input):
     def task_output_callback(task_output):
         """Called when each task completes. Push the result to Firebase."""
         try:
-            agent_name = getattr(task_output, 'agent', 'Agent')
+            # Extract agent name — try multiple paths since CrewAI stores it differently
+            agent_name = "Agent"
+            agent_obj = getattr(task_output, 'agent', None)
+            if agent_obj:
+                # agent_obj might be a string or an Agent object with a .role
+                if hasattr(agent_obj, 'role'):
+                    agent_name = agent_obj.role
+                else:
+                    agent_name = str(agent_obj)
+            
+            # Also try the 'name' attribute on the TaskOutput
+            if agent_name == "Agent":
+                agent_name = getattr(task_output, 'name', 'Agent')
+
             raw_output = getattr(task_output, 'raw', '') or str(task_output)
             
+            # Clean up agent name — remove "The " prefix for cleaner display
+            clean_name = str(agent_name).strip()
+            
             print(f"\n--- [TASK COMPLETE -> FIREBASE] ---")
-            print(f"Agent: {agent_name}")
+            print(f"Agent: {clean_name}")
             print(f"Output: {raw_output[:200]}...")
             print("-----------------------------------\n")
             
-            push_agent_message("default_session", str(agent_name), raw_output)
+            push_agent_message("default_session", clean_name, raw_output)
         except Exception as e:
             print(f"[TASK CALLBACK ERROR]: {e}")
 
@@ -113,15 +129,11 @@ def run_debate_crew(student_input):
         process=Process.hierarchical,
         manager_llm=flash_llm,
         verbose=False,
-        step_callback=firebase_step_callback,
         task_callback=task_output_callback,
     )
 
     print("\nStarting Debate Crew Simulation...")
     result = debate_crew.kickoff()
-    
-    # Also push the final combined result
-    push_agent_message("default_session", "Arbiter (Final Verdict)", str(result))
     
     print("\n=============================================")
     print("DEBATE SESSION COMPLETED")
