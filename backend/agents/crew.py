@@ -24,45 +24,7 @@ def shadow_auditor_before_action(role: str, task_description: str):
         print(f"\n[SYSTEM] Injecting Rigor Instruction into {role}'s prompt.")
         pass
 
-def firebase_step_callback(output):
-    """
-    CrewAI step_callback hook.
-    This acts as the 'Live Reporter'.
-    Receives either an AgentFinish or AgentAction object from CrewAI.
-    """
-    try:
-        text = ""
-        agent_name = "Agent"
 
-        # Try to get the clean output text
-        if hasattr(output, 'result'):
-            text = str(output.result)
-        elif hasattr(output, 'output'):
-            text = str(output.output)
-        elif hasattr(output, 'return_values') and isinstance(output.return_values, dict):
-            text = output.return_values.get('output', str(output))
-        elif hasattr(output, 'log'):
-            text = output.log
-        else:
-            text = str(output)
-
-        # Try to get the agent name
-        if hasattr(output, 'agent') and output.agent:
-            agent_name = str(output.agent)
-        
-        # Skip empty or very short outputs
-        if not text or len(text.strip()) < 5:
-            return
-
-        print(f"\n--- [FIREBASE STREAM] ---")
-        print(f"Agent: {agent_name}")
-        print(f"Pushing to UI: {text[:150]}...")
-        print("------------------------------\n")
-
-        push_agent_message("default_session", agent_name, text)
-
-    except Exception as e:
-        print(f"\n[FIREBASE STREAM ERROR]: Could not parse step output — {e}")
 
 def run_debate_crew(student_input):
     if not init_firebase():
@@ -74,7 +36,7 @@ def run_debate_crew(student_input):
         os.environ["GEMINI_API_KEY"] = os.environ.get("GOOGLE_API_KEY")
 
     # Setup models
-    flash_llm = LLM(model="gemini/gemini-3-flash-preview", temperature=0.7)
+    flash_llm = LLM(model="gemini/gemini-3-flash-preview", temperature=0.7, max_rpm=4)
     
     # 1. Get Agents
     skeptic, overexplainer, questioner, arbiter = get_agents()
@@ -82,47 +44,50 @@ def run_debate_crew(student_input):
     # 3. Get Tasks — use the student's input as the topic
     tasks = get_debate_tasks([skeptic, overexplainer, questioner, arbiter], student_input, student_input)
 
-    # 4. Run Shadow Auditor Check
-    # In a real app this runs asynchronously when the student hits 'Send'
+    # 4. Build task-to-agent name mapping (needed because hierarchical mode
+    #    reports all tasks as "Crew Manager" — we map back to the real agent)
+    task_agent_map = {}
+    for task in tasks:
+        if task.agent and hasattr(task.agent, 'role'):
+            task_agent_map[task.description[:60]] = task.agent.role
+
+    # 5. Run Shadow Auditor Check
     current_rigor_injection = run_shadow_auditor(student_input, context="", verbose=True)
     
     # If injection fired, we dynamically alter the challenge task
     if current_rigor_injection:
-        tasks[1].description += current_rigor_injection # the challenge task
+        tasks[1].description += current_rigor_injection
 
     def task_output_callback(task_output):
         """Called when each task completes. Push the result to Firebase."""
         try:
-            # Extract agent name — try multiple paths since CrewAI stores it differently
-            agent_name = "Agent"
-            agent_obj = getattr(task_output, 'agent', None)
-            if agent_obj:
-                # agent_obj might be a string or an Agent object with a .role
-                if hasattr(agent_obj, 'role'):
+            # Get the correct agent name by matching task description
+            desc = getattr(task_output, 'description', '')[:60]
+            agent_name = task_agent_map.get(desc, None)
+
+            # Fallback: try reading from the task_output directly
+            if not agent_name:
+                agent_obj = getattr(task_output, 'agent', None)
+                if agent_obj and hasattr(agent_obj, 'role'):
                     agent_name = agent_obj.role
-                else:
+                elif agent_obj:
                     agent_name = str(agent_obj)
-            
-            # Also try the 'name' attribute on the TaskOutput
-            if agent_name == "Agent":
-                agent_name = getattr(task_output, 'name', 'Agent')
+                else:
+                    agent_name = "Agent"
+
+            # Skip if it resolved to Crew Manager (duplicate echo)
+            if "manager" in agent_name.lower():
+                agent_name = "DebateWise"
 
             raw_output = getattr(task_output, 'raw', '') or str(task_output)
+            clean_name = agent_name.strip()
             
-            # Clean up agent name — remove "The " prefix for cleaner display
-            clean_name = str(agent_name).strip()
-            
-            print(f"\n--- [TASK COMPLETE -> FIREBASE] ---")
-            print(f"Agent: {clean_name}")
-            print(f"Output: {raw_output[:200]}...")
-            print("-----------------------------------\n")
-            
+            print(f"[FIREBASE] {clean_name}: {raw_output[:150]}...")
             push_agent_message("default_session", clean_name, raw_output)
         except Exception as e:
             print(f"[TASK CALLBACK ERROR]: {e}")
 
-    # 5. Initialize the Crew
-    # We use Hierarchical Process which automatically creates the Manager Agent out of the LLM.
+    # 6. Initialize the Crew
     debate_crew = Crew(
         agents=[skeptic, overexplainer, questioner, arbiter],
         tasks=tasks,
