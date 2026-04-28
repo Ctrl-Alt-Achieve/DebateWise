@@ -3,11 +3,9 @@ import 'package:provider/provider.dart';
 import 'theme.dart';
 import 'screens/landing_page.dart';
 import 'services/firebase_service.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(fileName: ".env");
   
   final firebaseService = FirebaseService();
   await firebaseService.initialize();

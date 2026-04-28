@@ -31,6 +31,23 @@
     }
   </style>
 
+  <!-- Firebase JS SDK (compat) — required for Flutter firebase_database on web -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+  <script>
+    // Pre-initialize Firebase so the Flutter SDK picks it up
+    firebase.initializeApp({
+      apiKey: "AIzaSyAU4z1s8X-lBwrhIxVM8w87DBETd_UjqIg",
+      authDomain: "solutionh2s.firebaseapp.com",
+      databaseURL: "https://solutionh2s-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "solutionh2s",
+      storageBucket: "solutionh2s.appspot.com",
+      messagingSenderId: "440568479033",
+      appId: "1:440568479033:web:3dd3593301fc04265bbce8"
+    });
+  </script>
+
   <script>
     var serviceWorkerVersion = null;
   </script>

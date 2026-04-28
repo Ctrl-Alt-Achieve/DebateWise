@@ -1,5 +1,9 @@
 from crewai import Crew, Process, LLM
 from dotenv import load_dotenv
+import os
+import threading
+import http.server
+import socketserver
 
 # Load environment variables from .env file
 load_dotenv()
@@ -88,16 +92,28 @@ def run_debate_crew(student_input):
             print(f"[TASK CALLBACK ERROR]: {e}")
 
     # 6. Initialize the Crew
+    # Using Sequential process for better reliability and lower overhead.
     debate_crew = Crew(
         agents=[skeptic, overexplainer, questioner, arbiter],
         tasks=tasks,
-        process=Process.hierarchical,
-        manager_llm=flash_llm,
+        process=Process.sequential,
         verbose=False,
         task_callback=task_output_callback,
     )
 
     print("\nStarting Debate Crew Simulation...")
+    
+    # Reset CrewAI's internal ThreadPoolExecutor before kickoff.
+    # This prevents 'cannot schedule new futures after shutdown' errors
+    # caused by the global singleton event bus getting into a bad state.
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        from crewai.events.event_bus import crewai_event_bus
+        crewai_event_bus._sync_executor = ThreadPoolExecutor(max_workers=1)
+        print("[CREWAI FIX] Event bus executor reset.")
+    except Exception as e:
+        print(f"[CREWAI FIX] Warning: Could not reset event bus: {e}")
+    
     result = debate_crew.kickoff()
     
     print("\n=============================================")
@@ -120,54 +136,100 @@ def listen_for_inputs():
     print("=============================================\n")
 
     processed_inputs = set()
-
-    def listener(event):
-        print(f"[DEBUG] Firebase Event Received! Type: {event.event_type}, Path: {event.path}")
-        print(f"[DEBUG] Raw Data: {event.data}")
-        
-        if event.data is None:
-            return
-            
-        # If event.data is a dict, it might be the initial snapshot or a new push
-        # We iterate through all items to find ones we haven't processed yet
-        items_to_process = []
-        if isinstance(event.data, dict):
-            # Check if it's a single message (if path is deep) or a collection
-            if 'text' in event.data and 'agent' in event.data:
-                items_to_process = [event.data]
-            else:
-                # It's a collection of messages indexed by random keys
-                for key, val in event.data.items():
-                    if key not in processed_inputs:
-                        items_to_process.append(val)
-                        processed_inputs.add(key)
-        
-        for item in items_to_process:
-            text = item.get('text', '')
-            agent = item.get('agent', '')
-            
-            if agent == 'User' and text:
-                print(f"\n>> Received new User input: '{text}'")
-                print(">> Kicking off Debate Crew...")
-                try:
-                    run_debate_crew(student_input=text)
-                    print("\n>> Ready for next input...")
-                except Exception as e:
-                    print(f"[ERROR] Debate run failed: {e}")
+    dedup_lock = threading.Lock()
+    debate_lock = threading.Lock()  # Only one debate at a time
 
     # Listen for new child added to the inputs node
-    ref = db.reference('sessions/default_session/inputs')
+    ref_path = 'sessions/default_session/inputs'
+    ref = db.reference(ref_path)
+    print(f"[FIREBASE DEBUG]: Listening to path: {ref_path}")
+
+    def run_debate_in_thread(text):
+        """Run the debate in a background thread with proper isolation."""
+        print(f"\n>> [THREAD] Starting debate for: '{text}'")
+        try:
+            import subprocess
+            import sys
+            
+            # Use sys.executable to ensure we use the same Python environment
+            # Pass the current environment to the subprocess
+            env = os.environ.copy()
+            
+            print(f">> [THREAD] Spawning subprocess for: {text[:30]}...")
+            proc = subprocess.Popen(
+                [sys.executable, "run_debate.py", text],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, # Merge stderr into stdout
+                text=True,
+                bufsize=1 # Line buffered
+            )
+            
+            # Stream the output from the subprocess to the main logs line by line
+            for line in proc.stdout:
+                print(f"[SUBPROCESS]: {line.strip()}")
+                
+            proc.wait()
+            print(f"\n>> [THREAD] Debate subprocess finished with code {proc.returncode}")
+        except Exception as e:
+            print(f"[THREAD ERROR] Subprocess launch failed: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            debate_lock.release()
+            print(">> [THREAD] Debate lock released. Ready for next input.")
+
+    def listener(event):
+        print(f"[DEBUG] Event: Type={event.event_type}, Path={event.path}")
+        
+        if event.data is None:
+            print("[DEBUG] Received null data, skipping...")
+            return
+            
+        # Determine what to process
+        text_to_process = None
+        
+        if isinstance(event.data, dict):
+            if 'text' in event.data and 'agent' in event.data:
+                # Single new message
+                msg_key = event.path.strip('/')
+                with dedup_lock:
+                    if msg_key and msg_key not in processed_inputs:
+                        processed_inputs.add(msg_key)
+                        if event.data.get('agent') == 'User':
+                            text_to_process = event.data.get('text', '')
+                    else:
+                        print(f"[DEBUG] Duplicate event for {msg_key}, skipping.")
+                        return
+            else:
+                # Initial snapshot — mark all as seen, don't process
+                with dedup_lock:
+                    count = len(event.data)
+                    for key in event.data.keys():
+                        processed_inputs.add(key)
+                print(f"[DEBUG] Initial snapshot: marked {count} existing messages as seen.")
+                return
+        
+        if text_to_process:
+            # Try to acquire debate lock (non-blocking)
+            if debate_lock.acquire(blocking=False):
+                print(f"\n>> New User input: '{text_to_process}'")
+                print(">> Launching debate in thread...")
+                t = threading.Thread(
+                    target=run_debate_in_thread,
+                    args=(text_to_process,),
+                    daemon=True
+                )
+                t.start()
+            else:
+                print(f"[BUSY] Debate already running, skipping: '{text_to_process[:40]}...'")
+
     # Using listen() to wait for new children
     try:
-        ref.delete()
+        ref.listen(listener)
     except Exception as e:
-        print(f"[WARNING] Could not clear old inputs (maybe database is empty or URL is incorrect): {e}")
-    
-    # We can't easily listen to just 'child_added' in Python Firebase Admin exactly like JS,
-    # but listen() triggers on any changes. To make it only trigger on new items,
-    # we can process event and keep track of processed keys if we wanted to.
-    # However, since we clear it, any new data added will trigger this.
-    ref.listen(listener)
+        print(f"[ERROR] Firebase listener failed to start: {e}")
+        return
     
     try:
         while True:
@@ -175,7 +237,26 @@ def listen_for_inputs():
     except KeyboardInterrupt:
         print("\nShutting down backend listener.")
 
+def run_health_server():
+    """
+    Simple HTTP server to satisfy Cloud Run's health check requirement.
+    Listens on the port specified by the PORT environment variable (default 8080).
+    """
+    port = int(os.environ.get("PORT", 8080))
+    class HealthHandler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"OK")
+            
+    with socketserver.TCPServer(("", port), HealthHandler) as httpd:
+        print(f"[HEALTH CHECK] Serving on port {port}")
+        httpd.serve_forever()
+
 if __name__ == "__main__":
+    # Start the health check server in a daemon thread
+    threading.Thread(target=run_health_server, daemon=True).start()
+
     # Check if API Key is set before running
     import os
     if not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):

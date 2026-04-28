@@ -13,9 +13,13 @@ class FirebaseService extends ChangeNotifier {
 
   Future<void> initialize() async {
     try {
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
+      // Check if Firebase is already initialized (e.g., from index.html)
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
+      }
+      debugPrint("[FirebaseService] Firebase initialized. Apps: ${Firebase.apps.length}");
       listenToSession('default_session');
     } catch (e) {
       debugPrint("Firebase initialization error: $e");

@@ -17,8 +17,12 @@ def init_firebase():
         cred_path = os.environ.get("FIREBASE_CREDENTIALS", "serviceAccountKey.json")
         db_url = os.environ.get("FIREBASE_DB_URL", "https://MOCK_URL.firebaseio.com")
         
+        abs_cred_path = os.path.abspath(cred_path)
+        print(f"[FIREBASE DEBUG]: Checking for credentials at: {abs_cred_path}")
+        print(f"[FIREBASE DEBUG]: Database URL: {db_url}")
+        
         if not os.path.exists(cred_path):
-            print(f"[FIREBASE WARNING]: '{cred_path}' not found. Realtime DB streaming is disabled.")
+            print(f"[FIREBASE WARNING]: '{abs_cred_path}' not found. Realtime DB streaming is disabled.")
             return False
 
         if "MOCK_URL" in db_url:

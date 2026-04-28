@@ -10,7 +10,7 @@ def get_agents():
     flash_llm = LLM(
         model="gemini/gemini-3-flash-preview",
         temperature=0.7,
-        max_rpm=4,  # Free tier: max 5 req/min, keep under that
+        max_rpm=4,
     )
     
     pro_llm = LLM(
